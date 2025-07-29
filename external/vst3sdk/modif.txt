@@ -1,0 +1,1 @@
+vst3sdk/cmake/modules/SMTG_AddSMTGLibrary.cmake L276 removed dll entry
