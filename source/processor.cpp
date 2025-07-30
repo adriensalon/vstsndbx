@@ -36,7 +36,6 @@ Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
 
 Steinberg::tresult PLUGIN_API sandbox_processor::setActive(Steinberg::TBool state)
 {
-    auto* kk = _proxy_data.plugin_data->instances[_proxy_data.instance_id]->plugin_provider->getComponent();
     // Steinberg::tresult _result = _original_processor->setActive(state);
     return AudioEffect::setActive(state);
 }
