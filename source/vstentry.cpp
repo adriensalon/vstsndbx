@@ -4,6 +4,9 @@
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/stringbuffer.h>
 
 #include <array>
 #include <filesystem>
@@ -14,24 +17,20 @@
 #include <sstream>
 #include <stdexcept>
 
-#include <sndbx.hpp>
+#include <sandbox.hpp>
 
-#define sndbx_vendor "sndbx"
-#define sndbx_url "github.com/adriensalon/vstsndbx"
-#define sndbx_email "adrien.salon@live.fr"
+#define sandbox_vendor "sandbox"
+#define sandbox_url "github.com/adriensalon/vstsandbox"
+#define sandbox_email "adrien.salon@live.fr"
+#define vstsandbox_json_file "vstsandbox.json"
 
 #define VST_MAX_PATH 2048
 extern Steinberg::tchar gPath[VST_MAX_PATH];
 
-extern Steinberg::FUnknown* create_sndbx_effect_instance(void* context);
-extern Steinberg::FUnknown* create_sndbx_controller_instance(void* context);
+extern Steinberg::FUnknown* create_sandbox_processor_instance(void* context);
+extern Steinberg::FUnknown* create_sandbox_controller_instance(void* context);
 
 // HOLD STATIC ARRAY of original_plugin_data
-
-struct proxy_plugin_callbacks {
-    Steinberg::FUnknown* (*processor_create_instance_function)(void*);
-    Steinberg::FUnknown* (*controller_create_instance_function)(void*);
-};
 
 [[nodiscard]] std::filesystem::path get_proxy_working_directory()
 {
@@ -73,6 +72,26 @@ struct proxy_plugin_callbacks {
 [[nodiscard]] std::vector<std::filesystem::path> load_json_plugin_paths(const std::filesystem::path& json_path)
 {
     std::vector<std::filesystem::path> result;
+    rapidjson::Document doc;
+
+    if (!std::filesystem::exists(json_path)) {
+        doc.SetObject();
+        rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+
+        doc.AddMember("vst2_paths", rapidjson::Value(rapidjson::kArrayType), allocator);
+        doc.AddMember("vst3_paths", rapidjson::Value(rapidjson::kArrayType), allocator);
+
+        std::ofstream out(json_path);
+        if (out) {
+            rapidjson::StringBuffer buffer;
+            rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+            doc.Accept(writer);
+            out << buffer.GetString();
+        } else {
+            std::cerr << "Erreur : impossible de créer " << json_path << std::endl;
+        }
+
+    }
 
     // Lire le fichier JSON
     std::ifstream file(json_path);
@@ -86,7 +105,6 @@ struct proxy_plugin_callbacks {
     std::string json = buffer.str();
 
     // Parse avec RapidJSON
-    rapidjson::Document doc;
     rapidjson::ParseResult ok = doc.Parse(json.c_str());
     if (!ok) {
         std::cerr << "Erreur de parsing : " << rapidjson::GetParseError_En(ok.Code())
@@ -109,9 +127,9 @@ struct proxy_plugin_callbacks {
     return result;
 }
 
-[[nodiscard]] std::vector<original_plugin_data> load_original_plugins(const std::filesystem::path& plugin_path)
+[[nodiscard]] std::vector<sandboxed_plugin_data> load_sandboxed_plugins(const std::filesystem::path& plugin_path)
 {
-    std::vector<original_plugin_data> _original_plugins;
+    std::vector<sandboxed_plugin_data> _original_plugins;
     std::string _error;
     VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _error);
     if (!_module) {
@@ -128,7 +146,7 @@ struct proxy_plugin_callbacks {
     for (VST3::Hosting::ClassInfo& _class_info : _factory.classInfos()) {
         if (_class_info.category() == kVstAudioEffectClass) {
 
-            original_plugin_data& _original_plugin = _original_plugins.emplace_back();
+            sandboxed_plugin_data& _original_plugin = _original_plugins.emplace_back();
             Steinberg::Vst::PlugProvider* _plugin_provider = new Steinberg::Vst::PlugProvider(_factory, _class_info, true);
 
             _original_plugin.plugin_name = _class_info.name();
@@ -162,7 +180,12 @@ struct proxy_plugin_callbacks {
     return _original_plugins;
 }
 
-void register_proxy_plugin(Steinberg::CPluginFactory* factory, const original_plugin_data& original_plugin, const proxy_plugin_callbacks& create_info)
+struct proxy_plugin_callbacks {
+    Steinberg::FUnknown* (*processor_create_instance_function)(void*);
+    Steinberg::FUnknown* (*controller_create_instance_function)(void*);
+};
+
+void register_proxy_plugin(Steinberg::CPluginFactory* factory, const sandboxed_plugin_data& original_plugin, const proxy_plugin_callbacks& create_info)
 {
     Steinberg::TUID _proxy_processor_tuid = INLINE_UID_FROM_FUID(original_plugin.proxy_processor_uid);
     Steinberg::TUID _proxy_controller_tuid = INLINE_UID_FROM_FUID(original_plugin.proxy_controller_uid);
@@ -189,8 +212,8 @@ void register_proxy_plugin(Steinberg::CPluginFactory* factory, const original_pl
         original_plugin.plugin_version.c_str(),
         kVstVersionString);
 
-    factory->registerClass(&_processor_class, create_info.processor_create_instance_function, (void*)(new original_plugin_data(original_plugin)));
-    factory->registerClass(&_controller_class, create_info.controller_create_instance_function, (void*)(new original_plugin_data(original_plugin)));
+    factory->registerClass(&_processor_class, create_info.processor_create_instance_function, (void*)(new sandboxed_plugin_data(original_plugin)));
+    factory->registerClass(&_controller_class, create_info.controller_create_instance_function, (void*)(new sandboxed_plugin_data(original_plugin)));
 }
 
 SMTG_EXPORT_SYMBOL Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory()
@@ -200,20 +223,20 @@ SMTG_EXPORT_SYMBOL Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory()
 
     } else {
         static Steinberg::PFactoryInfo _factory_info(
-            sndbx_vendor,
-            sndbx_url,
-            sndbx_email,
+            sandbox_vendor,
+            sandbox_url,
+            sandbox_email,
             Steinberg::Vst::kDefaultFactoryFlags);
         
-        const std::filesystem::path _json_path = get_proxy_working_directory() / "sndbx.json";
+        const std::filesystem::path _json_path = get_proxy_working_directory() / vstsandbox_json_file;
         Steinberg::gPluginFactory = new Steinberg::CPluginFactory(_factory_info);
 
         for (const std::filesystem::path& _plugin_path : load_json_plugin_paths(_json_path)) {
-            for (const original_plugin_data& _original_plugin : load_original_plugins(_plugin_path)) {
+            for (const sandboxed_plugin_data& _sandboxed_plugin : load_sandboxed_plugins(_plugin_path)) {
                 proxy_plugin_callbacks _proxy_plugin;
-                _proxy_plugin.processor_create_instance_function = create_sndbx_effect_instance;
-                _proxy_plugin.controller_create_instance_function = create_sndbx_controller_instance;
-                register_proxy_plugin(Steinberg::gPluginFactory, _original_plugin, _proxy_plugin);
+                _proxy_plugin.processor_create_instance_function = create_sandbox_processor_instance;
+                _proxy_plugin.controller_create_instance_function = create_sandbox_controller_instance;
+                register_proxy_plugin(Steinberg::gPluginFactory, _sandboxed_plugin, _proxy_plugin);
             }
         }
     }

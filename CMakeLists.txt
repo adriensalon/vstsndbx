@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
-project(vstsndbx VERSION 1.0.0)
+project(vstsandbox VERSION 1.0.0)
 
-set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES ON)
+set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF)
 set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF)
 set(SMTG_ENABLE_VSTGUI_SUPPORT ON)
 add_subdirectory(external/vst3sdk)
@@ -39,12 +39,12 @@ set(moduleinfotool_sources
     ${CMAKE_CURRENT_LIST_DIR}/external/vst3sdk/public.sdk/source/vst/hosting/plugprovider.h
 )
 
-file(GLOB_RECURSE vstsndbx_source "source/*.cpp")
-smtg_add_vst3plugin(vstsndbx ${vstsndbx_source} ${moduleinfotool_sources})
-set_target_properties(vstsndbx PROPERTIES CXX_STANDARD 17)
-target_link_libraries(vstsndbx PRIVATE sdk sdk_hosting sdk_common)
-target_compile_definitions(vstsndbx PRIVATE _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS) # for rapidjson
-target_include_directories(vstsndbx PRIVATE source)
-target_include_directories(vstsndbx PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/vst3sdk)
-target_include_directories(vstsndbx PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/rapidjson/include)
+file(GLOB_RECURSE vstsandbox_source "source/*.cpp")
+smtg_add_vst3plugin(vstsandbox ${vstsandbox_source} ${moduleinfotool_sources})
+set_target_properties(vstsandbox PROPERTIES CXX_STANDARD 17)
+target_link_libraries(vstsandbox PRIVATE sdk sdk_hosting sdk_common)
+target_compile_definitions(vstsandbox PRIVATE _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS) # for rapidjson
+target_include_directories(vstsandbox PRIVATE source)
+target_include_directories(vstsandbox PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/vst3sdk)
+target_include_directories(vstsandbox PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/rapidjson/include)
 

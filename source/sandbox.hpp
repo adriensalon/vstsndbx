@@ -5,7 +5,7 @@
 
 #include <filesystem>
 
-struct original_plugin_data {
+struct sandboxed_plugin_data {
     std::filesystem::path plugin_path;
     std::string plugin_name;
     Steinberg::Vst::IComponent* plugin_component;
