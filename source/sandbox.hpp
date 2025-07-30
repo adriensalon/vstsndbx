@@ -16,8 +16,8 @@ struct sandboxed_plugin_instance {
     std::shared_ptr<Steinberg::Vst::PlugProvider> plugin_provider { nullptr };
     Steinberg::Vst::IComponent* instance_processor { nullptr }; // owned by plugin_provider
     Steinberg::Vst::IEditController* instance_controller { nullptr }; // owned by plugin_provider
-    bool is_processor_created { false };
-    bool is_controller_created { false };
+    bool is_processor_created { false }; // represents proxy!! should come first because we reorder
+    bool is_controller_created { false }; // represents proxy!! 
 };
 
 struct sandboxed_plugin_data {
@@ -30,16 +30,18 @@ struct sandboxed_plugin_data {
     Steinberg::FUID proxy_controller_uid {};
     VST3::Hosting::ClassInfo class_info {};
     std::vector<Steinberg::Vst::ParameterInfo> original_parameters {};
-    std::unordered_map<std::size_t, std::shared_ptr<sandboxed_plugin_instance>> instances {};
-    std::unordered_map<std::size_t, std::shared_ptr<sandboxed_plugin_instance>> pending_instances {};
+    std::unordered_map<std::size_t, std::shared_ptr<sandboxed_plugin_instance>> sandboxed_instances {};
     std::mutex pending_mutex {};
-    std::atomic<std::size_t> next_id { 0 };
+    std::atomic<std::size_t> next_instance_id { 0 };
     std::atomic<bool> should_increment { false };
 };
 
 struct sandboxed_proxy_data {
     sandboxed_plugin_data* plugin_data;
     std::size_t instance_id;
+
+    Steinberg::Vst::IComponent* get_sandboxed_processor();
+    Steinberg::Vst::IEditController* get_sandboxed_controller();
 };
 
 struct sandbox_processor : public Steinberg::Vst::AudioEffect {
@@ -102,13 +104,13 @@ struct sandbox_controller : public Steinberg::Vst::EditControllerEx1 {
 
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override
     {
-        _proxy_data.plugin_data->instances[_proxy_data.instance_id]->instance_controller->setState(state);
+        _proxy_data.plugin_data->sandboxed_instances[_proxy_data.instance_id]->instance_controller->setState(state);
         return Steinberg::kResultOk;
     }
 
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override
     {
-        _proxy_data.plugin_data->instances[_proxy_data.instance_id]->instance_controller->setState(state);
+        _proxy_data.plugin_data->sandboxed_instances[_proxy_data.instance_id]->instance_controller->setState(state);
         return Steinberg::kResultOk;
     }
 

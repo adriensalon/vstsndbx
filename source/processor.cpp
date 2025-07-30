@@ -31,6 +31,9 @@ Steinberg::tresult PLUGIN_API sandbox_processor::initialize(Steinberg::FUnknown*
 
 Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
 {
+    _proxy_data.get_sandboxed_processor()->terminate();
+    // no we must call ourself plugprovider + module shutdown bc on a pas d'autre entry point pour ca
+    // + delete instance de la map
     return AudioEffect::terminate();
 }
 
@@ -108,13 +111,13 @@ Steinberg::tresult PLUGIN_API sandbox_processor::process(Steinberg::Vst::Process
 Steinberg::tresult PLUGIN_API sandbox_processor::setState(Steinberg::IBStream* state)
 {
     // Steinberg::IBStreamer streamer (state, kLittleEndian);
-    _proxy_data.plugin_data->instances[_proxy_data.instance_id]->instance_processor->setState(state);
+    _proxy_data.get_sandboxed_processor()->setState(state);
     return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::getState(Steinberg::IBStream* state)
 {
     // Steinberg::IBStreamer streamer (state, kLittleEndian);
-    _proxy_data.plugin_data->instances[_proxy_data.instance_id]->instance_processor->getState(state);
+    _proxy_data.get_sandboxed_processor()->getState(state);
     return Steinberg::kResultOk;
 }
