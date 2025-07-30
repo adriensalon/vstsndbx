@@ -1,12 +1,11 @@
 #include <public.sdk/source/main/pluginfactory.h>
-#include <public.sdk/source/vst/hosting/module.h>
-#include <public.sdk/source/vst/hosting/plugprovider.h>
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
-#include <rapidjson/writer.h>
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
+
 
 #include <array>
 #include <filesystem>
@@ -30,7 +29,7 @@ extern Steinberg::tchar gPath[VST_MAX_PATH];
 extern Steinberg::FUnknown* create_sandbox_processor_instance(void* context);
 extern Steinberg::FUnknown* create_sandbox_controller_instance(void* context);
 
-static std::vector<sandboxed_plugin_data> sandboxed_plugins;
+static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plugins;
 
 [[nodiscard]] std::filesystem::path get_proxy_working_directory()
 {
@@ -90,7 +89,6 @@ static std::vector<sandboxed_plugin_data> sandboxed_plugins;
         } else {
             std::cerr << "Erreur : impossible de créer " << json_path << std::endl;
         }
-
     }
 
     // Lire le fichier JSON
@@ -127,7 +125,7 @@ static std::vector<sandboxed_plugin_data> sandboxed_plugins;
     return result;
 }
 
-[[nodiscard]] std::vector<sandboxed_plugin_data>& load_sandboxed_plugins(const std::filesystem::path& plugin_path)
+[[nodiscard]] void load_sandboxed_plugins(const std::filesystem::path& plugin_path)
 {
     std::string _error;
     VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _error);
@@ -145,38 +143,45 @@ static std::vector<sandboxed_plugin_data> sandboxed_plugins;
     for (VST3::Hosting::ClassInfo& _class_info : _factory.classInfos()) {
         if (_class_info.category() == kVstAudioEffectClass) {
 
-            sandboxed_plugin_data& _original_plugin = sandboxed_plugins.emplace_back();
-            
-            _original_plugin.plugin_provider = std::make_unique<Steinberg::Vst::PlugProvider>(_factory, _class_info, true);
 
-            _original_plugin.plugin_name = _class_info.name();
-            _original_plugin.plugin_processor = _original_plugin.plugin_provider->getComponent();
-            _original_plugin.plugin_controller = _original_plugin.plugin_provider->getController();
+            sandboxed_plugin_instance _temp_id_collect_instance;
+            _temp_id_collect_instance.plugin_provider = std::make_shared<Steinberg::Vst::PlugProvider>(_factory, _class_info, true);
+            _temp_id_collect_instance.instance_processor = _temp_id_collect_instance.plugin_provider->getComponent();
+            _temp_id_collect_instance.instance_controller = _temp_id_collect_instance.plugin_provider->getController();
 
-            if (!_original_plugin.plugin_processor) {
+            if (!_temp_id_collect_instance.instance_processor) {
                 // throw
             }
-            if (!_original_plugin.plugin_controller) {
+
+            if (!_temp_id_collect_instance.instance_controller) {
                 continue;
             }
 
             Steinberg::TUID _original_controller_tuid;
-            if (_original_plugin.plugin_processor->getControllerClassId(_original_controller_tuid) != Steinberg::kResultOk) {
+            if (_temp_id_collect_instance.instance_processor->getControllerClassId(_original_controller_tuid) != Steinberg::kResultOk) {
                 // normalement ca passe
             }
-            _original_plugin.original_processor_uid = Steinberg::FUID::fromTUID(_class_info.ID().data());
-            _original_plugin.original_controller_uid = Steinberg::FUID::fromTUID(_original_controller_tuid);
 
-            _original_plugin.proxy_processor_uid = derive_proxy_uid(_original_plugin.original_processor_uid, "p1");
-            _original_plugin.proxy_controller_uid = derive_proxy_uid(_original_plugin.original_controller_uid, "p2");
+            std::shared_ptr<sandboxed_plugin_data> _original_plugin = global_sandboxed_plugins.emplace_back(std::make_shared<sandboxed_plugin_data>());
 
-            _original_plugin.plugin_path = plugin_path;
-            _original_plugin.plugin_version = _class_info.version();
+            _original_plugin->class_info = _class_info;
+
+            _original_plugin->original_processor_uid = Steinberg::FUID::fromTUID(_class_info.ID().data());
+            _original_plugin->original_controller_uid = Steinberg::FUID::fromTUID(_original_controller_tuid);
+
+            static std::size_t _salt_id = 0;
+            _original_plugin->proxy_processor_uid = derive_proxy_uid(_original_plugin->original_processor_uid, "p1" + std::to_string(_salt_id));
+            _original_plugin->proxy_controller_uid = derive_proxy_uid(_original_plugin->original_controller_uid, "p2" + std::to_string(_salt_id));
+            _salt_id++;
+
+            _original_plugin->plugin_path = plugin_path;
+            _original_plugin->plugin_name = _class_info.name();
+            _original_plugin->plugin_version = _class_info.version();
 
             // auto midiMapping = Steinberg::U::cast<Steinberg::Vst::IMidiMapping>(_original_plugin.plugin_controller);
+            
         }
     }
-    return sandboxed_plugins;
 }
 
 struct proxy_plugin_callbacks {
@@ -226,20 +231,20 @@ SMTG_EXPORT_SYMBOL Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory()
             sandbox_url,
             sandbox_email,
             Steinberg::Vst::kDefaultFactoryFlags);
-        
+
         const std::filesystem::path _json_path = get_proxy_working_directory() / vstsandbox_json_file;
-        
+
         Steinberg::gPluginFactory = new Steinberg::CPluginFactory(_factory_info);
 
         for (const std::filesystem::path& _plugin_path : load_json_plugin_paths(_json_path)) {
-            for (sandboxed_plugin_data& _sandboxed_plugin : load_sandboxed_plugins(_plugin_path)) {
-                
-                proxy_plugin_callbacks _proxy_plugin;
-                _proxy_plugin.processor_create_instance_function = create_sandbox_processor_instance;
-                _proxy_plugin.controller_create_instance_function = create_sandbox_controller_instance;
-                
-                register_proxy_plugin(Steinberg::gPluginFactory, _sandboxed_plugin, _proxy_plugin);
-            }
+            load_sandboxed_plugins(_plugin_path);
+        }
+
+        for (std::shared_ptr<sandboxed_plugin_data>& _sandboxed_plugin : global_sandboxed_plugins) {
+            proxy_plugin_callbacks _proxy_plugin;
+            _proxy_plugin.processor_create_instance_function = create_sandbox_processor_instance;
+            _proxy_plugin.controller_create_instance_function = create_sandbox_controller_instance;
+            register_proxy_plugin(Steinberg::gPluginFactory, *(_sandboxed_plugin.get()), _proxy_plugin);
         }
     }
 
