@@ -127,38 +127,32 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
 
 [[nodiscard]] void load_sandboxed_plugins(const std::filesystem::path& plugin_path)
 {
-    std::string _error;
-    VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _error);
+    std::string _module_error;
+    VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _module_error);
     if (!_module) {
-        std::string _reason = "Could not create Module for file:";
-        _reason += plugin_path.string();
-        _reason += "\nError: ";
-        _reason += _error;
-        // EditorHost::IPlatform::instance ().kill (-1, _reason);
-        // return;
+        std::string _error_text = "Sandbox error: could not create Module with error " + _module_error;
+        std::cerr << _error_text << std::endl;
+        throw std::runtime_error(_error_text);
     }
 
     VST3::Hosting::PluginFactory _factory = _module->getFactory();
-
     for (VST3::Hosting::ClassInfo& _class_info : _factory.classInfos()) {
-        if (_class_info.category() == kVstAudioEffectClass) {
 
+        if (_class_info.category() == kVstAudioEffectClass) {            
+            Steinberg::Vst::PlugProvider* _plugin_provider = new Steinberg::Vst::PlugProvider(_factory, _class_info, true);
+            Steinberg::Vst::IComponent* _instance_processor = _plugin_provider->getComponent();
+            Steinberg::Vst::IEditController* _instance_controller = _plugin_provider->getController();
 
-            sandboxed_plugin_instance _temp_id_collect_instance;
-            _temp_id_collect_instance.plugin_provider = std::make_shared<Steinberg::Vst::PlugProvider>(_factory, _class_info, true);
-            _temp_id_collect_instance.instance_processor = _temp_id_collect_instance.plugin_provider->getComponent();
-            _temp_id_collect_instance.instance_controller = _temp_id_collect_instance.plugin_provider->getController();
-
-            if (!_temp_id_collect_instance.instance_processor) {
+            if (!_instance_processor) {
                 // throw
             }
 
-            if (!_temp_id_collect_instance.instance_controller) {
+            if (!_instance_controller) {
                 continue;
             }
 
             Steinberg::TUID _original_controller_tuid;
-            if (_temp_id_collect_instance.instance_processor->getControllerClassId(_original_controller_tuid) != Steinberg::kResultOk) {
+            if (_instance_processor->getControllerClassId(_original_controller_tuid) != Steinberg::kResultOk) {
                 // normalement ca passe
             }
 
@@ -180,6 +174,19 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
 
             // auto midiMapping = Steinberg::U::cast<Steinberg::Vst::IMidiMapping>(_original_plugin.plugin_controller);
             
+            std::size_t _parameters_count = _instance_controller->getParameterCount();
+            _original_plugin->original_parameters.resize(_parameters_count);
+            for (Steinberg::int32 _k = 0; _k < _parameters_count; ++_k) {
+                Steinberg::Vst::ParameterInfo info;
+                if (_instance_controller->getParameterInfo(_k, info) == Steinberg::kResultOk) {
+                    _original_plugin->original_parameters[_k] = info;
+                } else {
+                    // error
+                }
+            }
+
+
+            delete _plugin_provider;
         }
     }
 }

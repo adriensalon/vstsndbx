@@ -44,24 +44,27 @@ Steinberg::FUnknown* create_sandbox_processor_instance(void* context)
     std::shared_ptr<sandboxed_plugin_instance> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
 
     std::string _module_error;
-    VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(_proxy_data.plugin_data->plugin_path.string(), _module_error);
-    if (!_module) {
+    _plugin_instance->host_module = VST3::Hosting::Module::create(_proxy_data.plugin_data->plugin_path.string(), _module_error);
+    if (!_plugin_instance->host_module) {
         std::string _error_text = "Sandbox error: could not create Module with error " + _module_error;
         std::cerr << _error_text << std::endl;
         throw std::runtime_error(_error_text);
     }
 
-    std::shared_ptr<Steinberg::Vst::PlugProvider> _plugin_provider = std::make_shared<Steinberg::Vst::PlugProvider>(_module->getFactory(), _proxy_data.plugin_data->class_info, true);
-    _plugin_instance->plugin_provider = _plugin_provider;
-    _plugin_instance->instance_processor = _plugin_provider->getComponent();
-    _plugin_instance->instance_controller = _plugin_provider->getController();
-    if (!_plugin_instance->instance_processor)
-        return nullptr;
+    _plugin_instance->plugin_provider = std::make_shared<Steinberg::Vst::PlugProvider>(_plugin_instance->host_module->getFactory(), _proxy_data.plugin_data->class_info, true);
+    _plugin_instance->instance_processor = _plugin_instance->plugin_provider->getComponent();
+    _plugin_instance->instance_controller = _plugin_instance->plugin_provider->getController();
+    if (!_plugin_instance->instance_processor || !_plugin_instance->instance_controller) {
+        std::string _error_text = "Sandbox error: could not create sandboxed processor or controller";
+        std::cerr << _error_text << std::endl;
+        throw std::runtime_error(_error_text);
+    }
 
     _plugin_instance->is_processor_created = true;
+    _plugin_instance->instance_processor->addRef(); // Must addRef before returning
+    _plugin_instance->instance_controller->addRef(); // Must addRef before returning
+
     finalize_if_ready(_proxy_data.plugin_data, _proxy_data.instance_id, _plugin_instance);
-    // _plugin_instance->instance_processor->addRef(); // Must addRef before returning
-    
     return (Steinberg::Vst::IAudioProcessor*)new sandbox_processor(_proxy_data);
 }
 
@@ -77,10 +80,8 @@ Steinberg::FUnknown* create_sandbox_controller_instance(void* context)
     }
 
     std::shared_ptr<sandboxed_plugin_instance> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
-
     _plugin_instance->is_controller_created = true;
-    finalize_if_ready(_proxy_data.plugin_data, _proxy_data.instance_id, _plugin_instance);
-    // _plugin_instance->instance_controller->addRef(); // Must addRef before returning
 
+    finalize_if_ready(_proxy_data.plugin_data, _proxy_data.instance_id, _plugin_instance);
     return (Steinberg::Vst::IEditController*)new sandbox_controller(_proxy_data);
 }
