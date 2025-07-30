@@ -11,16 +11,21 @@ sandbox_controller::~sandbox_controller()
 
 Steinberg::tresult PLUGIN_API sandbox_controller::initialize(Steinberg::FUnknown* context)
 {
+    Steinberg::tresult _retval = EditControllerEx1::initialize(context);
 
-    auto k = EditControllerEx1::initialize(context);
-
-    std::vector<Steinberg::Vst::ParameterInfo>& _params = _proxy_data.plugin_data->original_parameters;
-    for (const auto& info : _params) {
-        // parameters.addParameter(info);
+    for (const Steinberg::Vst::UnitInfo& _unit_info : _proxy_data.plugin_data->original_units) {
+        if (_unit_info.id == Steinberg::Vst::kRootUnitId && _unit_info.name[0] == 0)
+            continue;
+        
+        Steinberg::Vst::Unit* _proxy_unit = new Steinberg::Vst::Unit(_unit_info);
+        addUnit(_proxy_unit);
     }
 
-    // forward parameters
-    return k;
+    for (const Steinberg::Vst::ParameterInfo& _parameter_info : _proxy_data.plugin_data->original_parameters) {
+        parameters.addParameter(_parameter_info);
+    }
+
+    return _retval;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_controller::terminate()

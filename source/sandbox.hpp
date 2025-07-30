@@ -30,6 +30,7 @@ struct sandboxed_plugin_data {
     Steinberg::FUID proxy_controller_uid;
     VST3::Hosting::ClassInfo class_info;
     std::vector<Steinberg::Vst::ParameterInfo> original_parameters;
+    std::vector<Steinberg::Vst::UnitInfo> original_units;
     std::unordered_map<std::size_t, std::shared_ptr<sandboxed_plugin_instance>> sandboxed_instances;
     std::mutex pending_mutex;
     std::atomic<std::size_t> next_instance_id { 0 };

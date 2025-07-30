@@ -6,7 +6,6 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
-
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -138,7 +137,7 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
     VST3::Hosting::PluginFactory _factory = _module->getFactory();
     for (VST3::Hosting::ClassInfo& _class_info : _factory.classInfos()) {
 
-        if (_class_info.category() == kVstAudioEffectClass) {            
+        if (_class_info.category() == kVstAudioEffectClass) {
             Steinberg::Vst::PlugProvider* _plugin_provider = new Steinberg::Vst::PlugProvider(_factory, _class_info, true);
             Steinberg::Vst::IComponent* _instance_processor = _plugin_provider->getComponent();
             Steinberg::Vst::IEditController* _instance_controller = _plugin_provider->getController();
@@ -173,18 +172,27 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
             _original_plugin->plugin_version = _class_info.version();
 
             // auto midiMapping = Steinberg::U::cast<Steinberg::Vst::IMidiMapping>(_original_plugin.plugin_controller);
-            
+
             std::size_t _parameters_count = _instance_controller->getParameterCount();
             _original_plugin->original_parameters.resize(_parameters_count);
             for (Steinberg::int32 _k = 0; _k < _parameters_count; ++_k) {
                 Steinberg::Vst::ParameterInfo info;
                 if (_instance_controller->getParameterInfo(_k, info) == Steinberg::kResultOk) {
                     _original_plugin->original_parameters[_k] = info;
-                } else {
-                    // error
                 }
             }
 
+            Steinberg::FUnknownPtr<Steinberg::Vst::IUnitInfo> _unit_info_interface(_instance_controller);
+            if (_unit_info_interface) {
+                std::size_t _units_count = _unit_info_interface->getUnitCount();
+                _original_plugin->original_units.resize(_units_count);
+                for (Steinberg::int32 i = 0; i < _units_count; ++i) {
+                    Steinberg::Vst::UnitInfo info {};
+                    if (_unit_info_interface->getUnitInfo(i, info) == Steinberg::kResultOk) {
+                        _original_plugin->original_units.push_back(info);
+                    }
+                }
+            }
 
             delete _plugin_provider;
         }
