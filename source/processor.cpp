@@ -24,7 +24,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::initialize(Steinberg::FUnknown*
     // return Steinberg::kResultOk;
     
     // sandboxed_plugin_instance* _instance = _proxy_data.plugin_data->instances[_proxy_data.instance_id].get();
-    // _proxy_data.plugin_data->instances[_proxy_data.instance_id]->instance_processor->initialize(context);
+    // _proxy_data.plugin_data->instances[_proxy_data.instance_id]->sandboxed_processor->initialize(context);
 
     return result;
 }
