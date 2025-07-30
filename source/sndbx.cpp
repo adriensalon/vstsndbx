@@ -1,17 +1,12 @@
-// #include <sndbx.hpp>
-
-#include <public.sdk/source/vst/vstaudioeffect.h>
-#include <public.sdk/source/vst/vsteditcontroller.h>
-
 #include <sndbx.hpp>
 
-/// @brief 
 struct sndbx_processor : public Steinberg::Vst::AudioEffect {
-    
-    sndbx_processor(Steinberg::Vst::IComponent* original_processor)
+
+    sndbx_processor(const Steinberg::FUID& controller_uid)
     {
-        _original_processor = original_processor;
-        setControllerClass(ControllerUID);
+        // setControllerClass(ControllerUID);
+        Steinberg::TUID _t = INLINE_UID_FROM_FUID(controller_uid);
+        setControllerClass(_t);
     }
 
     ~sndbx_processor() override
@@ -108,7 +103,7 @@ struct sndbx_processor : public Steinberg::Vst::AudioEffect {
         // Steinberg::IBStreamer streamer (state, kLittleEndian);
         return Steinberg::kResultOk;
     }
-    
+
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override
     {
         // Steinberg::IBStreamer streamer (state, kLittleEndian);
@@ -116,20 +111,18 @@ struct sndbx_processor : public Steinberg::Vst::AudioEffect {
     }
 
 private:
-    Steinberg::Vst::IComponent* _original_processor;
+    // original_plugin_data _original_processor;
 };
 
-/// @brief 
 struct sndbx_controller : public Steinberg::Vst::EditControllerEx1 {
 
+    // sndbx_controller(original_plugin_data* original_processor)
     sndbx_controller()
     {
-
     }
 
     ~sndbx_controller() override
     {
-
     }
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override
@@ -137,7 +130,7 @@ struct sndbx_controller : public Steinberg::Vst::EditControllerEx1 {
 
         return EditControllerEx1::initialize(context);
     }
-    
+
     Steinberg::tresult PLUGIN_API terminate() override
     {
         return EditControllerEx1::terminate();
@@ -169,32 +162,18 @@ struct sndbx_controller : public Steinberg::Vst::EditControllerEx1 {
     // // DEF_INTERFACE (Vst::IXXX)
     // END_DEFINE_INTERFACES(EditController)
     // DELEGATE_REFCOUNT(EditController)
-
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 Steinberg::FUnknown* create_sndbx_effect_instance(void* context)
 {
-    return (Steinberg::Vst::IAudioProcessor*)new sndbx_processor((Steinberg::Vst::IComponent*)context);
+    // return (Steinberg::Vst::IAudioProcessor*)new sndbx_processor((original_plugin_data*)context);
+    original_plugin_data* orig = static_cast<original_plugin_data*>(context);
+    return (Steinberg::Vst::IAudioProcessor*)new sndbx_processor(orig->proxy_controller_uid); // pass controller UID here
+    
 }
 
 Steinberg::FUnknown* create_sndbx_controller_instance(void* context)
 {
-    return (Steinberg::Vst::IEditController*)new sndbx_controller;
+    // return (Steinberg::Vst::IEditController*)new sndbx_controller((original_plugin_data*)context);
+    return (Steinberg::Vst::IEditController*)new sndbx_controller();
 }

@@ -1,49 +1,75 @@
-// vst3sdk
 #include <public.sdk/source/main/pluginfactory.h>
 #include <public.sdk/source/vst/hosting/module.h>
 #include <public.sdk/source/vst/hosting/plugprovider.h>
-#include <public.sdk/source/vst/vstaudioeffect.h>
-#include <public.sdk/source/vst/vsteditcontroller.h>
 
-#include <sndbx.hpp>
-
-// rapidjson
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 
-// std
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <stdexcept>
+#include <random>
 #include <sstream>
+#include <stdexcept>
 
-extern Steinberg::FUnknown* create_sndbx_effect_instance(void* context);
-extern Steinberg::FUnknown* create_sndbx_controller_instance(void* context);
+#include <sndbx.hpp>
 
-// proxy plugins constants
 #define sndbx_vendor "sndbx"
 #define sndbx_url "github.com/adriensalon/vstsndbx"
 #define sndbx_email "adrien.salon@live.fr"
 
-/// @brief Represents the original plugin data
-struct original_plugin_data {
-    std::filesystem::path plugin_path;
-    Steinberg::Vst::IComponent* plugin_component;
-    Steinberg::Vst::IEditController* plugin_controller;
-    VST3::UID component_uid;
-    VST3::UID controller_uid;
-    std::string plugin_version;
-};
+#define VST_MAX_PATH 2048
+extern Steinberg::tchar gPath[VST_MAX_PATH];
 
-/// @brief Represents the proxy plugin data
-struct proxy_plugin_data {
+extern Steinberg::FUnknown* create_sndbx_effect_instance(void* context);
+extern Steinberg::FUnknown* create_sndbx_controller_instance(void* context);
+
+// HOLD STATIC ARRAY of original_plugin_data
+
+struct proxy_plugin_callbacks {
     Steinberg::FUnknown* (*processor_create_instance_function)(void*);
     Steinberg::FUnknown* (*controller_create_instance_function)(void*);
 };
 
-/// @brief Loads all the original plugins paths from the specified json path
+[[nodiscard]] std::filesystem::path get_proxy_working_directory()
+{
+#if SMTG_OS_WINDOWS
+    return std::filesystem::path(gPath).parent_path().parent_path().parent_path().parent_path();
+#endif
+    return std::filesystem::path(gPath).parent_path();
+}
+
+[[nodiscard]] std::string hash_to_uid_string(const std::string& input)
+{
+    std::hash<std::string> hasher;
+    size_t h = hasher(input);
+
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (int i = 0; i < 4; ++i) {
+        oss << std::setw(8) << static_cast<uint32_t>((h >> (i * 16)) & 0xFFFFFFFF);
+    }
+
+    std::string result = oss.str();
+    result.resize(32, '0'); // Ensure it's 32 chars
+    return result;
+}
+
+[[nodiscard]] Steinberg::FUID derive_proxy_uid(const Steinberg::FUID& original, const std::string& purpose)
+{
+    char fuid_str[33] = {};
+    original.toString(fuid_str);
+
+    std::string combined = std::string(fuid_str) + purpose;
+    std::string hashed_str = hash_to_uid_string(combined);
+
+    Steinberg::FUID proxy;
+    proxy.fromString(hashed_str.c_str());
+    return proxy;
+}
+
 [[nodiscard]] std::vector<std::filesystem::path> load_json_plugin_paths(const std::filesystem::path& json_path)
 {
     std::vector<std::filesystem::path> result;
@@ -69,12 +95,12 @@ struct proxy_plugin_data {
     }
 
     // Extraire les chemins
-    if (!doc.HasMember("paths") || !doc["paths"].IsArray()) {
-        std::cerr << "Champ 'paths' manquant ou invalide." << std::endl;
+    if (!doc.HasMember("vst3_paths") || !doc["vst3_paths"].IsArray()) {
+        std::cerr << "Champ 'vst3_paths' manquant ou invalide." << std::endl;
         return result;
     }
 
-    for (const auto& val : doc["paths"].GetArray()) {
+    for (const auto& val : doc["vst3_paths"].GetArray()) {
         if (val.IsString()) {
             result.emplace_back(std::filesystem::path(val.GetString()));
         }
@@ -83,10 +109,9 @@ struct proxy_plugin_data {
     return result;
 }
 
-/// @brief Loads all the original plugins contained in each original plugin path (multiple plugins in a module)
 [[nodiscard]] std::vector<original_plugin_data> load_original_plugins(const std::filesystem::path& plugin_path)
 {
-    original_plugin_data _original_plugin {};
+    std::vector<original_plugin_data> _original_plugins;
     std::string _error;
     VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _error);
     if (!_module) {
@@ -97,50 +122,56 @@ struct proxy_plugin_data {
         // EditorHost::IPlatform::instance ().kill (-1, _reason);
         // return;
     }
-    VST3::Hosting::PluginFactory factory = _module->getFactory();
 
-    Steinberg::IPtr<Steinberg::Vst::PlugProvider> plugProvider;
-    for (auto& classInfo : factory.classInfos()) {
-        if (classInfo.category() == kVstAudioEffectClass) {
+    VST3::Hosting::PluginFactory _factory = _module->getFactory();
 
-            plugProvider = Steinberg::owned(new Steinberg::Vst::PlugProvider(factory, classInfo, true));
-            break;
+    for (VST3::Hosting::ClassInfo& _class_info : _factory.classInfos()) {
+        if (_class_info.category() == kVstAudioEffectClass) {
+
+            original_plugin_data& _original_plugin = _original_plugins.emplace_back();
+            Steinberg::Vst::PlugProvider* _plugin_provider = new Steinberg::Vst::PlugProvider(_factory, _class_info, true);
+
+            _original_plugin.plugin_name = _class_info.name();
+            _original_plugin.plugin_component = _plugin_provider->getComponent();
+            _original_plugin.plugin_controller = _plugin_provider->getController();
+
+            if (!_original_plugin.plugin_component) {
+                // throw
+            }
+            if (!_original_plugin.plugin_controller) {
+                continue;
+            }
+
+            Steinberg::TUID _original_controller_tuid;
+            if (_original_plugin.plugin_component->getControllerClassId(_original_controller_tuid) != Steinberg::kResultOk) {
+                // normalement ca passe
+            }
+            _original_plugin.original_processor_uid = Steinberg::FUID::fromTUID(_class_info.ID().data());
+            _original_plugin.original_controller_uid = Steinberg::FUID::fromTUID(_original_controller_tuid);
+
+            _original_plugin.proxy_processor_uid = derive_proxy_uid(_original_plugin.original_processor_uid, "p1");
+            _original_plugin.proxy_controller_uid = derive_proxy_uid(_original_plugin.original_controller_uid, "p2");
+
+            _original_plugin.plugin_path = plugin_path;
+            _original_plugin.plugin_version = _class_info.version();
+
+            // auto midiMapping = Steinberg::U::cast<Steinberg::Vst::IMidiMapping>(_original_plugin.plugin_controller);
         }
     }
-    if (!plugProvider) {
-        std::string error;
-        error = "No VST3 Audio Module Class found in file ";
-        error += plugin_path.string();
-        // EditorHost::IPlatform::instance ().kill (-1, error);
-        // return ;
-    }
 
-    // _original_plugin.component_uid = factory.classInfos()[0].ID(); CRASH
-    // _original_plugin.controller_uid = factory.classInfos()[1].ID(); CRASH
-    _original_plugin.plugin_component = plugProvider->getComponent();
-    _original_plugin.plugin_controller = plugProvider->getController();
-    _original_plugin.component_uid = ProcessorUID; // TODO
-    _original_plugin.controller_uid = ControllerUID; // TODO
-    _original_plugin.plugin_path = plugin_path;
-    _original_plugin.plugin_version = "1.0.0"; // get from classes?
-    auto midiMapping = Steinberg::U::cast<Steinberg::Vst::IMidiMapping>(_original_plugin.plugin_controller);
-
-    //! TODO: Query the plugProvider for a proper name which gets displayed in JACK.
-    // auto vst3Processor = AudioClient::create("VST 3 SDK", component, midiMapping);
-
-    return { _original_plugin };
+    return _original_plugins;
 }
 
-/// @brief Registers the proxy plugin to the plugin factory
-void register_proxy_plugin(Steinberg::CPluginFactory* factory, const original_plugin_data& original_plugin, const proxy_plugin_data& create_info)
+void register_proxy_plugin(Steinberg::CPluginFactory* factory, const original_plugin_data& original_plugin, const proxy_plugin_callbacks& create_info)
 {
-    const std::string _plugin_name = original_plugin.plugin_path.filename().replace_extension("").string();
+    Steinberg::TUID _proxy_processor_tuid = INLINE_UID_FROM_FUID(original_plugin.proxy_processor_uid);
+    Steinberg::TUID _proxy_controller_tuid = INLINE_UID_FROM_FUID(original_plugin.proxy_controller_uid);
 
     Steinberg::PClassInfo2 _processor_class(
-        original_plugin.component_uid.data(),
+        _proxy_processor_tuid,
         Steinberg::PClassInfo::kManyInstances,
         kVstAudioEffectClass,
-        (_plugin_name + " (Sandboxed)").c_str(),
+        (original_plugin.plugin_name + " (Sandboxed)").c_str(),
         Steinberg::Vst::kDistributable,
         "Fx",
         nullptr,
@@ -148,21 +179,20 @@ void register_proxy_plugin(Steinberg::CPluginFactory* factory, const original_pl
         kVstVersionString);
 
     Steinberg::PClassInfo2 _controller_class(
-        original_plugin.controller_uid.data(),
+        _proxy_controller_tuid,
         Steinberg::PClassInfo::kManyInstances,
         kVstComponentControllerClass,
-        (_plugin_name + " [Controller] (Sandboxed)").c_str(),
+        (original_plugin.plugin_name + " [Controller] (Sandboxed)").c_str(),
         0,
         "",
         nullptr,
         original_plugin.plugin_version.c_str(),
         kVstVersionString);
 
-    factory->registerClass(&_processor_class, create_info.processor_create_instance_function, original_plugin.plugin_component);
-    factory->registerClass(&_controller_class, create_info.controller_create_instance_function, original_plugin.plugin_controller);
+    factory->registerClass(&_processor_class, create_info.processor_create_instance_function, (void*)(new original_plugin_data(original_plugin)));
+    factory->registerClass(&_controller_class, create_info.controller_create_instance_function, (void*)(new original_plugin_data(original_plugin)));
 }
 
-/// @brief Exported function to create the proxy plugin from the host
 SMTG_EXPORT_SYMBOL Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory()
 {
     if (Steinberg::gPluginFactory) {
@@ -174,18 +204,15 @@ SMTG_EXPORT_SYMBOL Steinberg::IPluginFactory* PLUGIN_API GetPluginFactory()
             sndbx_url,
             sndbx_email,
             Steinberg::Vst::kDefaultFactoryFlags);
-
-        // TODO FIND JSON NEAR sndbx dll
-        std::filesystem::path _json_path = "C:/Users/adri/dev/vstsndbx/.dev/conf.json";
-
+        
+        const std::filesystem::path _json_path = get_proxy_working_directory() / "sndbx.json";
         Steinberg::gPluginFactory = new Steinberg::CPluginFactory(_factory_info);
 
         for (const std::filesystem::path& _plugin_path : load_json_plugin_paths(_json_path)) {
             for (const original_plugin_data& _original_plugin : load_original_plugins(_plugin_path)) {
-                proxy_plugin_data _proxy_plugin = {
-                    _proxy_plugin.processor_create_instance_function = create_sndbx_effect_instance,
-                    _proxy_plugin.controller_create_instance_function = create_sndbx_controller_instance
-                };
+                proxy_plugin_callbacks _proxy_plugin;
+                _proxy_plugin.processor_create_instance_function = create_sndbx_effect_instance;
+                _proxy_plugin.controller_create_instance_function = create_sndbx_controller_instance;
                 register_proxy_plugin(Steinberg::gPluginFactory, _original_plugin, _proxy_plugin);
             }
         }

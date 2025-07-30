@@ -1,8 +1,18 @@
 #pragma once
 
-#include "pluginterfaces/base/funknown.h"
+#include <public.sdk/source/vst/vstaudioeffect.h>
+#include <public.sdk/source/vst/vsteditcontroller.h>
 
-inline static const Steinberg::FUID ProcessorUID(0xC18D3C1E, 0x719E4E29, 0x924D3ECA, 0xA5E4DA18);
-inline static const Steinberg::FUID ControllerUID(0xC244B7E6, 0x24084E20, 0xA24A8C43, 0xF84C8BE8);
+#include <filesystem>
 
-
+struct original_plugin_data {
+    std::filesystem::path plugin_path;
+    std::string plugin_name;
+    Steinberg::Vst::IComponent* plugin_component;
+    Steinberg::Vst::IEditController* plugin_controller;
+    Steinberg::FUID original_processor_uid;
+    Steinberg::FUID original_controller_uid;
+    Steinberg::FUID proxy_processor_uid;
+    Steinberg::FUID proxy_controller_uid;
+    std::string plugin_version;
+};
