@@ -86,14 +86,14 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
             doc.Accept(writer);
             out << buffer.GetString();
         } else {
-            std::cerr << "Erreur : impossible de créer " << json_path << std::endl;
+            std::cout << "Erreur : impossible de créer " << json_path << std::endl;
         }
     }
 
     // Lire le fichier JSON
     std::ifstream file(json_path);
     if (!file) {
-        std::cerr << "Erreur : impossible d'ouvrir " << json_path << std::endl;
+        std::cout << "Erreur : impossible d'ouvrir " << json_path << std::endl;
         return result;
     }
 
@@ -104,14 +104,14 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
     // Parse avec RapidJSON
     rapidjson::ParseResult ok = doc.Parse(json.c_str());
     if (!ok) {
-        std::cerr << "Erreur de parsing : " << rapidjson::GetParseError_En(ok.Code())
+        std::cout << "Erreur de parsing : " << rapidjson::GetParseError_En(ok.Code())
                   << " (offset " << ok.Offset() << ")" << std::endl;
         return result;
     }
 
     // Extraire les chemins
     if (!doc.HasMember("vst3_paths") || !doc["vst3_paths"].IsArray()) {
-        std::cerr << "Champ 'vst3_paths' manquant ou invalide." << std::endl;
+        std::cout << "Champ 'vst3_paths' manquant ou invalide." << std::endl;
         return result;
     }
 
@@ -129,9 +129,8 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
     std::string _module_error;
     VST3::Hosting::Module::Ptr _module = VST3::Hosting::Module::create(plugin_path.string(), _module_error);
     if (!_module) {
-        std::string _error_text = "Sandbox error: could not create Module with error " + _module_error;
-        std::cerr << _error_text << std::endl;
-        throw std::runtime_error(_error_text);
+        std::cout << "Sandbox error: could not create Module from " << plugin_path << " with error " + _module_error << std::endl;
+        return;
     }
 
     VST3::Hosting::PluginFactory _factory = _module->getFactory();
@@ -193,6 +192,27 @@ static std::vector<std::shared_ptr<sandboxed_plugin_data>> global_sandboxed_plug
                     }
                 }
             }
+
+            // Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_instance_processor);
+            // Steinberg::Vst::SpeakerArrangement stereo = Steinberg::Vst::SpeakerArr::kMono;
+            // _audio_processor->setBusArrangements(&stereo, 1, &stereo, 1);
+
+            // for (Steinberg::int32 dir = 0; dir < 2; ++dir) { // 0 = input, 1 = output
+            //     Steinberg::Vst::MediaType mediaTypes[] = {
+            //         Steinberg::Vst::kAudio,
+            //         Steinberg::Vst::kEvent
+            //     };
+
+            //     for (auto mediaType : mediaTypes) {
+            //         Steinberg::int32 busCount = _instance_processor->getBusCount(mediaType, dir);
+            //         for (Steinberg::int32 i = 0; i < busCount; ++i) {
+            //             Steinberg::Vst::BusInfo busInfo {};
+            //             if (_instance_processor->getBusInfo(mediaType, dir, i, busInfo) == Steinberg::kResultOk) {
+            //                 _original_plugin->original_buses.push_back(busInfo); // you'll need a struct to store direction+mediaType+info
+            //             }
+            //         }
+            //     }
+            // }
 
             delete _plugin_provider;
         }

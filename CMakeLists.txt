@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(vstsandbox VERSION 1.0.0)
 
-set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF)
+set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES ON)
 set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF)
 set(SMTG_ENABLE_VSTGUI_SUPPORT ON)
 add_subdirectory(external/vst3sdk)

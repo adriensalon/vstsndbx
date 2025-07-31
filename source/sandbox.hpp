@@ -57,6 +57,8 @@ struct sandbox_processor : public Steinberg::Vst::AudioEffect {
     Steinberg::tresult PLUGIN_API process(Steinberg::Vst::ProcessData& data) override;
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
+    Steinberg::tresult PLUGIN_API setBusArrangements(Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns, Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts) override;
+    Steinberg::tresult PLUGIN_API getBusArrangement(Steinberg::Vst::BusDirection dir, Steinberg::int32 busIndex, Steinberg::Vst::SpeakerArrangement& arr) override;
 
 private:
     sandboxed_proxy_data _proxy_data;
@@ -72,6 +74,14 @@ struct sandbox_controller : public Steinberg::Vst::EditControllerEx1 {
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
+    Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) override;
+    Steinberg::Vst::ParamValue PLUGIN_API getParamNormalized(Steinberg::Vst::ParamID id) override;
+
+    Steinberg::tresult beginEdit(Steinberg::Vst::ParamID tag) override; ///< to be called before a serie of performEdit
+    Steinberg::tresult performEdit(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue valueNormalized) override; ///< will inform the host about the value change
+    Steinberg::tresult endEdit(Steinberg::Vst::ParamID tag) override; ///< to be called after a serie of performEdit
+    Steinberg::tresult startGroupEdit() override; ///< calls IComponentHandler2::startGroupEdit() if host supports it
+    Steinberg::tresult finishGroupEdit() override; ///< calls IComponentHandler2::finishGroupEdit() if host supports it
 
 private:
     sandboxed_proxy_data _proxy_data;

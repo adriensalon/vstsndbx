@@ -1,5 +1,28 @@
 #include <sandbox.hpp>
 
+std::vector<Steinberg::Vst::BusInfo> get_bus_infos(Steinberg::Vst::IComponent* component)
+{
+    std::vector<Steinberg::Vst::BusInfo> _bus_infos;
+
+    for (Steinberg::int32 dir = 0; dir < 2; ++dir) { // 0 = input, 1 = output
+        Steinberg::Vst::MediaType mediaTypes[] = {
+            Steinberg::Vst::kAudio,
+            Steinberg::Vst::kEvent
+        };
+
+        for (Steinberg::Vst::MediaType mediaType : mediaTypes) {
+            Steinberg::int32 busCount = component->getBusCount(mediaType, dir);
+            for (Steinberg::int32 i = 0; i < busCount; ++i) {
+                Steinberg::Vst::BusInfo busInfo {};
+                if (component->getBusInfo(mediaType, dir, i, busInfo) == Steinberg::kResultOk) {
+                    _bus_infos.push_back(busInfo); // you'll need a struct to store direction+mediaType+info
+                }
+            }
+        }
+    }
+    return _bus_infos;
+}
+
 sandbox_processor::sandbox_processor(const sandboxed_proxy_data& proxy_data)
     : _proxy_data(proxy_data)
 {
@@ -11,27 +34,63 @@ sandbox_processor::~sandbox_processor()
 {
 }
 
+Steinberg::Vst::SpeakerArrangement mapChannelCountToArrangement(Steinberg::uint32 channelCount)
+{
+    switch (channelCount) {
+    case 1:
+        return Steinberg::Vst::SpeakerArr::kMono;
+    case 2:
+        return Steinberg::Vst::SpeakerArr::kStereo;
+    default:
+        return Steinberg::Vst::SpeakerArr::kEmpty; // Or throw / assert
+    }
+}
+
 Steinberg::tresult PLUGIN_API sandbox_processor::initialize(Steinberg::FUnknown* context)
 {
 
-    auto result = AudioEffect::initialize(context);
-    if (result == Steinberg::kResultTrue) {
-        addAudioInput(STR("Input"), Steinberg::Vst::SpeakerArr::kStereo);
-        addAudioOutput(STR("Output"), Steinberg::Vst::SpeakerArr::kStereo);
+    if (AudioEffect::initialize(context) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from base proxy class AudioEffect::initialize" << std::endl;
+        return Steinberg::kResultFalse;
     }
 
-    // return _sandboxed_processor->initialize(context);
-    // return Steinberg::kResultOk;
-    
-    // sandboxed_plugin_instance* _instance = _proxy_data.plugin_data->instances[_proxy_data.instance_id].get();
-    // _proxy_data.plugin_data->instances[_proxy_data.instance_id]->sandboxed_processor->initialize(context);
+    std::vector<Steinberg::Vst::BusInfo> _bus_infos = get_bus_infos(_proxy_data.get_sandboxed_processor());
 
-    return result;
+    for (const Steinberg::Vst::BusInfo& bus : _bus_infos) {
+        if (bus.mediaType == Steinberg::Vst::kAudio) {
+            if (bus.mediaType == Steinberg::Vst::kAudio) {
+                Steinberg::Vst::SpeakerArrangement arr = mapChannelCountToArrangement(bus.channelCount);
+                Steinberg::int32 expectedChannels = Steinberg::Vst::SpeakerArr::getChannelCount(arr);
+
+                if (expectedChannels != (Steinberg::int32)bus.channelCount) {
+                    std::cerr << "Channel mismatch on bus: " << bus.name
+                              << " | plugin says: " << bus.channelCount
+                              << ", arrangement says: " << expectedChannels << std::endl;
+                    continue; // or return kResultFalse if you want to fail hard
+                }
+
+                if (bus.direction == Steinberg::Vst::kInput)
+                    addAudioInput(bus.name, arr, bus.busType, bus.flags);
+                else
+                    addAudioOutput(bus.name, arr, bus.busType, bus.flags);
+            }
+
+        } else if (bus.mediaType == Steinberg::Vst::kEvent) {
+            if (bus.direction == Steinberg::Vst::kInput)
+                addEventInput(bus.name, bus.channelCount, bus.busType, bus.flags);
+            else
+                addEventOutput(bus.name, bus.channelCount, bus.busType, bus.flags);
+        }
+    }
+
+    _proxy_data.get_sandboxed_processor()->initialize(context);
+
+    return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
 {
-    _proxy_data.get_sandboxed_processor()->terminate();
+    // _proxy_data.get_sandboxed_processor()->terminate();
     // no we must call ourself plugprovider + module shutdown bc on a pas d'autre entry point pour ca
     // + delete instance de la map
     return AudioEffect::terminate();
@@ -39,85 +98,90 @@ Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
 
 Steinberg::tresult PLUGIN_API sandbox_processor::setActive(Steinberg::TBool state)
 {
-    // Steinberg::tresult _result = _original_processor->setActive(state);
-    return AudioEffect::setActive(state);
+    if (_proxy_data.get_sandboxed_processor()->setActive(state) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from sandboxed class IAudioProcessor::setActive" << std::endl;
+        return Steinberg::kResultFalse;
+    }
+
+    if (AudioEffect::setActive(state) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from base proxy class AudioEffect::setActive" << std::endl;
+        return Steinberg::kResultFalse;
+    }
+
+    return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::setupProcessing(Steinberg::Vst::ProcessSetup& newSetup)
 {
-    return AudioEffect::setupProcessing(newSetup);
+
+    Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
+    if (!_audio_processor) {
+        std::cout << "Sandbox error: interface IAudioProcessor not implemented by sandboxed class" << std::endl;
+        return Steinberg::kResultFalse;
+    }
+    if (_audio_processor->setupProcessing(newSetup) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from sandboxed class IAudioProcessor::setupProcessing" << std::endl;
+        return Steinberg::kResultFalse;
+    }
+
+    if (AudioEffect::setupProcessing(newSetup) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from base proxy class AudioEffect::setupProcessing" << std::endl;
+        return Steinberg::kResultFalse;
+    }
+
+    return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::canProcessSampleSize(std::int32_t symbolicSampleSize)
 {
-    if (symbolicSampleSize == Steinberg::Vst::kSample32)
-        return Steinberg::kResultTrue;
+    Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
+    if (!_audio_processor) {
+        std::cout << "Sandbox error: interface IAudioProcessor not implemented by sandboxed class" << std::endl;
+        return Steinberg::kResultFalse;
+    }
 
-    // disable the following comment if your processing support kSample64
-    /* if (symbolicSampleSize == Vst::kSample64)
-            return kResultTrue; */
-
-    return Steinberg::kResultFalse;
+    return _audio_processor->canProcessSampleSize(symbolicSampleSize);
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::process(Steinberg::Vst::ProcessData& data)
 {
-    static bool ok = false;
-    if (!ok) {
-
+    Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
+    if (!_audio_processor) {
+        std::cout << "Sandbox error: interface IAudioProcessor not implemented by sandboxed class" << std::endl;
+        return Steinberg::kResultFalse;
     }
-    if (data.numSamples > 0) {
-        //--- ------------------------------------------
-        // here as example a default implementation where we try to copy the inputs to the outputs:
-        // if less input than outputs then clear outputs
-        //--- ------------------------------------------
-
-        std::int32_t minBus = std::min(data.numInputs, data.numOutputs);
-        for (std::int32_t i = 0; i < minBus; i++) {
-            std::int32_t minChan = std::min(data.inputs[i].numChannels, data.outputs[i].numChannels);
-            for (std::int32_t c = 0; c < minChan; c++) {
-                // do not need to be copied if the buffers are the same
-                if (data.outputs[i].channelBuffers32[c] != data.inputs[i].channelBuffers32[c]) {
-                    std::memcpy(data.outputs[i].channelBuffers32[c], data.inputs[i].channelBuffers32[c],
-                        data.numSamples * sizeof(Steinberg::Vst::Sample32));
-                }
-            }
-            data.outputs[i].silenceFlags = data.inputs[i].silenceFlags;
-
-            // clear the remaining output buffers
-            for (std::int32_t c = minChan; c < data.outputs[i].numChannels; c++) {
-                // clear output buffers
-                std::memset(data.outputs[i].channelBuffers32[c], 0,
-                    data.numSamples * sizeof(Steinberg::Vst::Sample32));
-
-                // inform the host that this channel is silent
-                data.outputs[i].silenceFlags |= ((std::uint64_t)1 << c);
-            }
-        }
-        // clear the remaining output buffers
-        for (std::int32_t i = minBus; i < data.numOutputs; i++) {
-            // clear output buffers
-            for (std::int32_t c = 0; c < data.outputs[i].numChannels; c++) {
-                memset(data.outputs[i].channelBuffers32[c], 0,
-                    data.numSamples * sizeof(Steinberg::Vst::Sample32));
-            }
-            // inform the host that this bus is silent
-            data.outputs[i].silenceFlags = ((std::uint64_t)1 << data.outputs[i].numChannels) - 1;
-        }
+    if (_audio_processor->process(data) != Steinberg::kResultOk) {
+        std::cout << "Sandbox error: kResultFalse from sandboxed class IAudioProcessor::process" << std::endl;
+        return Steinberg::kResultFalse;
     }
+
     return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::setState(Steinberg::IBStream* state)
 {
-    // Steinberg::IBStreamer streamer (state, kLittleEndian);
-    _proxy_data.get_sandboxed_processor()->setState(state);
-    return Steinberg::kResultOk;
+    // Steinberg::IBStreamer streamer (state, kLittleEndian);    later we save state of the sandboxed plugin too
+    return _proxy_data.get_sandboxed_processor()->setState(state);
 }
 
 Steinberg::tresult PLUGIN_API sandbox_processor::getState(Steinberg::IBStream* state)
 {
-    // Steinberg::IBStreamer streamer (state, kLittleEndian);
-    _proxy_data.get_sandboxed_processor()->getState(state);
-    return Steinberg::kResultOk;
+    // Steinberg::IBStreamer streamer (state, kLittleEndian);        later we save state of the sandboxed plugin too
+    return _proxy_data.get_sandboxed_processor()->getState(state);
+}
+
+Steinberg::tresult PLUGIN_API sandbox_processor::setBusArrangements(Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns, Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts)
+{
+    if (auto sandboxed = Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor>(_proxy_data.get_sandboxed_processor())) {
+        return sandboxed->setBusArrangements(inputs, numIns, outputs, numOuts);
+    }
+    return Steinberg::kResultFalse; // Or log error
+}
+
+Steinberg::tresult PLUGIN_API sandbox_processor::getBusArrangement(Steinberg::Vst::BusDirection dir, Steinberg::int32 busIndex, Steinberg::Vst::SpeakerArrangement& arr)
+{
+    if (auto sandboxed = Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor>(_proxy_data.get_sandboxed_processor())) {
+        return sandboxed->getBusArrangement(dir, busIndex, arr);
+    }
+    return Steinberg::kResultFalse;
 }
