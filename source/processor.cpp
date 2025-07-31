@@ -32,6 +32,7 @@ proxy_processor::proxy_processor(const sandboxed_proxy_data& proxy_data)
 
 proxy_processor::~proxy_processor()
 {
+    _proxy_data.plugin_data->sandboxed_instances.erase(_proxy_data.instance_id);
 }
 
 Steinberg::Vst::SpeakerArrangement mapChannelCountToArrangement(Steinberg::uint32 channelCount)
