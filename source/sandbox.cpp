@@ -1,6 +1,6 @@
 #include <sandbox.hpp>
 
-std::shared_ptr<sandboxed_plugin_instance> get_or_create_pending_instance(sandboxed_plugin_data* data, std::size_t& id)
+std::shared_ptr<sandboxed_instance_data> get_or_create_pending_instance(sandboxed_plugin_data* data, std::size_t& id)
 {
     std::lock_guard _lock(data->pending_mutex);
 
@@ -10,9 +10,9 @@ std::shared_ptr<sandboxed_plugin_instance> get_or_create_pending_instance(sandbo
         id = data->next_instance_id.load();
     }
 
-    std::shared_ptr<sandboxed_plugin_instance>& _instance_slot = data->sandboxed_instances[id];
+    std::shared_ptr<sandboxed_instance_data>& _instance_slot = data->sandboxed_instances[id];
     if (!_instance_slot) {
-        _instance_slot = std::make_shared<sandboxed_plugin_instance>();
+        _instance_slot = std::make_shared<sandboxed_instance_data>();
     }
 
     return _instance_slot;
@@ -38,7 +38,7 @@ Steinberg::FUnknown* create_sandbox_processor_instance(void* context)
         return nullptr;
     }
 
-    std::shared_ptr<sandboxed_plugin_instance> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
+    std::shared_ptr<sandboxed_instance_data> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
     std::string _module_error;
     _plugin_instance->host_module = VST3::Hosting::Module::create(_proxy_data.plugin_data->plugin_path.string(), _module_error);
     if (!_plugin_instance->host_module) {
@@ -53,10 +53,8 @@ Steinberg::FUnknown* create_sandbox_processor_instance(void* context)
         return nullptr;
     }
     _plugin_instance->is_proxy_processor_created = true;
-    // _plugin_instance->sandboxed_processor->addRef(); // Must addRef before returning
-    // _plugin_instance->sandboxed_controller->addRef(); // Must addRef before returning
 
-    return (Steinberg::Vst::IAudioProcessor*)new sandbox_processor(_proxy_data);
+    return (Steinberg::Vst::IAudioProcessor*)new proxy_processor(_proxy_data);
 }
 
 Steinberg::FUnknown* create_sandbox_controller_instance(void* context)
@@ -69,8 +67,8 @@ Steinberg::FUnknown* create_sandbox_controller_instance(void* context)
         return nullptr;
     }
 
-    std::shared_ptr<sandboxed_plugin_instance> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
+    std::shared_ptr<sandboxed_instance_data> _plugin_instance = get_or_create_pending_instance(_proxy_data.plugin_data, _proxy_data.instance_id);
     _plugin_instance->is_proxy_controller_created = true;
 
-    return (Steinberg::Vst::IEditController*)new sandbox_controller(_proxy_data);
+    return (Steinberg::Vst::IEditController*)new proxy_controller(_proxy_data);
 }

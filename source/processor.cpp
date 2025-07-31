@@ -23,14 +23,14 @@ std::vector<Steinberg::Vst::BusInfo> get_bus_infos(Steinberg::Vst::IComponent* c
     return _bus_infos;
 }
 
-sandbox_processor::sandbox_processor(const sandboxed_proxy_data& proxy_data)
+proxy_processor::proxy_processor(const sandboxed_proxy_data& proxy_data)
     : _proxy_data(proxy_data)
 {
     Steinberg::TUID _controller_uid = INLINE_UID_FROM_FUID(_proxy_data.plugin_data->proxy_controller_uid);
     setControllerClass(_controller_uid);
 }
 
-sandbox_processor::~sandbox_processor()
+proxy_processor::~proxy_processor()
 {
 }
 
@@ -46,7 +46,7 @@ Steinberg::Vst::SpeakerArrangement mapChannelCountToArrangement(Steinberg::uint3
     }
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::initialize(Steinberg::FUnknown* context)
+Steinberg::tresult PLUGIN_API proxy_processor::initialize(Steinberg::FUnknown* context)
 {
 
     if (AudioEffect::initialize(context) != Steinberg::kResultOk) {
@@ -88,7 +88,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::initialize(Steinberg::FUnknown*
     return Steinberg::kResultOk;
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
+Steinberg::tresult PLUGIN_API proxy_processor::terminate()
 {
     // _proxy_data.get_sandboxed_processor()->terminate();
     // no we must call ourself plugprovider + module shutdown bc on a pas d'autre entry point pour ca
@@ -96,7 +96,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::terminate()
     return AudioEffect::terminate();
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::setActive(Steinberg::TBool state)
+Steinberg::tresult PLUGIN_API proxy_processor::setActive(Steinberg::TBool state)
 {
     if (_proxy_data.get_sandboxed_processor()->setActive(state) != Steinberg::kResultOk) {
         std::cout << "Sandbox error: kResultFalse from sandboxed class IAudioProcessor::setActive" << std::endl;
@@ -111,7 +111,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::setActive(Steinberg::TBool stat
     return Steinberg::kResultOk;
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::setupProcessing(Steinberg::Vst::ProcessSetup& newSetup)
+Steinberg::tresult PLUGIN_API proxy_processor::setupProcessing(Steinberg::Vst::ProcessSetup& newSetup)
 {
 
     Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
@@ -132,7 +132,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::setupProcessing(Steinberg::Vst:
     return Steinberg::kResultOk;
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::canProcessSampleSize(std::int32_t symbolicSampleSize)
+Steinberg::tresult PLUGIN_API proxy_processor::canProcessSampleSize(std::int32_t symbolicSampleSize)
 {
     Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
     if (!_audio_processor) {
@@ -143,7 +143,7 @@ Steinberg::tresult PLUGIN_API sandbox_processor::canProcessSampleSize(std::int32
     return _audio_processor->canProcessSampleSize(symbolicSampleSize);
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::process(Steinberg::Vst::ProcessData& data)
+Steinberg::tresult PLUGIN_API proxy_processor::process(Steinberg::Vst::ProcessData& data)
 {
     Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> _audio_processor(_proxy_data.get_sandboxed_processor());
     if (!_audio_processor) {
@@ -158,29 +158,30 @@ Steinberg::tresult PLUGIN_API sandbox_processor::process(Steinberg::Vst::Process
     return Steinberg::kResultOk;
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::setState(Steinberg::IBStream* state)
+Steinberg::tresult PLUGIN_API proxy_processor::setState(Steinberg::IBStream* state)
 {
     // Steinberg::IBStreamer streamer (state, kLittleEndian);    later we save state of the sandboxed plugin too
     return _proxy_data.get_sandboxed_processor()->setState(state);
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::getState(Steinberg::IBStream* state)
+Steinberg::tresult PLUGIN_API proxy_processor::getState(Steinberg::IBStream* state)
 {
     // Steinberg::IBStreamer streamer (state, kLittleEndian);        later we save state of the sandboxed plugin too
     return _proxy_data.get_sandboxed_processor()->getState(state);
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::setBusArrangements(Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns, Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts)
+Steinberg::tresult PLUGIN_API proxy_processor::setBusArrangements(Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns, Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts)
 {
-    if (auto sandboxed = Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor>(_proxy_data.get_sandboxed_processor())) {
+    Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> sandboxed(_proxy_data.get_sandboxed_processor());
+    if (sandboxed) {
         return sandboxed->setBusArrangements(inputs, numIns, outputs, numOuts);
     }
     return Steinberg::kResultFalse; // Or log error
 }
 
-Steinberg::tresult PLUGIN_API sandbox_processor::getBusArrangement(Steinberg::Vst::BusDirection dir, Steinberg::int32 busIndex, Steinberg::Vst::SpeakerArrangement& arr)
+Steinberg::tresult PLUGIN_API proxy_processor::getBusArrangement(Steinberg::Vst::BusDirection dir, Steinberg::int32 busIndex, Steinberg::Vst::SpeakerArrangement& arr)
 {
-    if (auto sandboxed = Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor>(_proxy_data.get_sandboxed_processor())) {
+    if (Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> sandboxed = Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor>(_proxy_data.get_sandboxed_processor())) {
         return sandboxed->getBusArrangement(dir, busIndex, arr);
     }
     return Steinberg::kResultFalse;

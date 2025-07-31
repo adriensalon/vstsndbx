@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-struct sandboxed_plugin_instance {
+struct sandboxed_instance_data {
     std::shared_ptr<VST3::Hosting::Module> host_module;
     std::shared_ptr<Steinberg::Vst::PlugProvider> plugin_provider;
     Steinberg::Vst::IComponent* sandboxed_processor { nullptr }; // owned by plugin_provider
@@ -31,7 +31,7 @@ struct sandboxed_plugin_data {
     VST3::Hosting::ClassInfo class_info;
     std::vector<Steinberg::Vst::ParameterInfo> original_parameters;
     std::vector<Steinberg::Vst::UnitInfo> original_units;
-    std::unordered_map<std::size_t, std::shared_ptr<sandboxed_plugin_instance>> sandboxed_instances;
+    std::unordered_map<std::size_t, std::shared_ptr<sandboxed_instance_data>> sandboxed_instances;
     std::mutex pending_mutex;
     std::atomic<std::size_t> next_instance_id { 0 };
     std::atomic<bool> should_increment { false };
@@ -45,9 +45,9 @@ struct sandboxed_proxy_data {
     Steinberg::Vst::IEditController* get_sandboxed_controller();
 };
 
-struct sandbox_processor : public Steinberg::Vst::AudioEffect {
-    sandbox_processor(const sandboxed_proxy_data& proxy_data);
-    ~sandbox_processor() override;
+struct proxy_processor : public Steinberg::Vst::AudioEffect {
+    proxy_processor(const sandboxed_proxy_data& proxy_data);
+    ~proxy_processor() override;
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
@@ -64,9 +64,70 @@ private:
     sandboxed_proxy_data _proxy_data;
 };
 
-struct sandbox_controller : public Steinberg::Vst::EditControllerEx1 {
-    sandbox_controller(const sandboxed_proxy_data& proxy_data);
-    ~sandbox_controller() override;
+struct proxy_component_handler : public Steinberg::Vst::IComponentHandler {
+
+    proxy_component_handler(Steinberg::Vst::IComponentHandler* realHostHandler)
+        : _hostHandler(realHostHandler)
+    {
+    }
+
+    virtual ~proxy_component_handler()
+    {
+        if (_hostHandler)
+            _hostHandler->release();
+    }
+
+    virtual Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj)
+    {
+        if (iid == Steinberg::Vst::IComponentHandler::iid) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            addRef();
+            return Steinberg::kResultOk;
+        }
+        return Steinberg::kNoInterface;
+    }
+
+    Steinberg::uint32 PLUGIN_API addRef() SMTG_OVERRIDE { return ++_refCount; }
+    Steinberg::uint32 PLUGIN_API release() SMTG_OVERRIDE
+    {
+        if (--_refCount == 0) {
+            delete this;
+            return 0;
+        }
+        return _refCount;
+    }
+
+    // IComponentHandler
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID tag) SMTG_OVERRIDE
+    {
+        return _hostHandler ? _hostHandler->beginEdit(tag) : Steinberg::kResultFalse;
+    }
+
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue valueNormalized) SMTG_OVERRIDE
+    {
+        return _hostHandler ? _hostHandler->performEdit(tag, valueNormalized) : Steinberg::kResultFalse;
+    }
+
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID tag) SMTG_OVERRIDE
+    {
+        return _hostHandler ? _hostHandler->endEdit(tag) : Steinberg::kResultFalse;
+    }
+
+    // beginGroupEdit ??
+
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) SMTG_OVERRIDE
+    {
+        return _hostHandler ? _hostHandler->restartComponent(flags) : Steinberg::kResultFalse;
+    }
+
+private:
+    std::atomic<Steinberg::uint32> _refCount { 1 };
+    Steinberg::Vst::IComponentHandler* _hostHandler = nullptr;
+};
+
+struct proxy_controller : public Steinberg::Vst::EditControllerEx1 {
+    proxy_controller(const sandboxed_proxy_data& proxy_data);
+    ~proxy_controller() override;
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
@@ -76,13 +137,9 @@ struct sandbox_controller : public Steinberg::Vst::EditControllerEx1 {
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) override;
     Steinberg::Vst::ParamValue PLUGIN_API getParamNormalized(Steinberg::Vst::ParamID id) override;
-
-    Steinberg::tresult beginEdit(Steinberg::Vst::ParamID tag) override; ///< to be called before a serie of performEdit
-    Steinberg::tresult performEdit(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue valueNormalized) override; ///< will inform the host about the value change
-    Steinberg::tresult endEdit(Steinberg::Vst::ParamID tag) override; ///< to be called after a serie of performEdit
-    Steinberg::tresult startGroupEdit() override; ///< calls IComponentHandler2::startGroupEdit() if host supports it
-    Steinberg::tresult finishGroupEdit() override; ///< calls IComponentHandler2::finishGroupEdit() if host supports it
+    Steinberg::tresult PLUGIN_API setComponentHandler(Steinberg::Vst::IComponentHandler* hostHandler) override;
 
 private:
     sandboxed_proxy_data _proxy_data;
+    Steinberg::Vst::IComponentHandler* _proxyHandler = nullptr;
 };
